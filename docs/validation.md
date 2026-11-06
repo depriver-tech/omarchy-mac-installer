@@ -73,3 +73,15 @@ For another app assembly, supply the exact authenticated inspection engine descr
 An M3 Air may be a physical validation candidate only after its exact model, engine support and intended payload are checked. The M4 Pro is available for macOS development; `apple,j614s` remains explicitly blocked. No hardware restriction is relaxed by this extraction.
 
 Physical installation needs its own backup, recovery, image/package revision and authorization record. Later release qualification must cover installation, Recovery boot, first boot, update, encrypted-install behavior and recovery on the assembled shared stack. Passing this source suite does not satisfy those checks.
+
+## Identity-only native port baseline
+
+For a board whose native support is being investigated, build the `InstallerReadinessCheck` executable and run:
+
+```sh
+.build/debug/InstallerReadinessCheck --identity-only
+```
+
+This mode emits JSON containing `schema_version`, `model`, `chip`, `device_identifier`, and `installation_readiness`. It queries only the three hardware properties used by the host inspector; it does not query storage, power, an engine archive, or a signed catalog. It requires no packaged app. A successful report means hardware identity was read, not that Linux can boot: `installation_readiness` is always `not_assessed` in this mode. Serial numbers and hardware UUIDs are not queried.
+
+Use the report to select the exact board for boot-chain and device-tree investigation. For example, an M5 Pro host measured as `Mac17,8` and `J716s` normalizes to `apple,j716s`; neither recognizing that name nor compiling the macOS installer qualifies it for native installation. The existing bundle readiness invocation remains separate and unchanged.

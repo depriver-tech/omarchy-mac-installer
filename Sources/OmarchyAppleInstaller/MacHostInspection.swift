@@ -113,7 +113,9 @@
       )
     }
 
-    private func inspectIdentity() throws -> AppleMacIdentity {
+    /// Hardware identity only: no storage, power, engine, or catalog probes.
+    /// Recognizing a board does not establish installation eligibility.
+    public func inspectIdentity() throws -> AppleMacIdentity {
       let model = try nonemptyHardwareProperty("hw.model")
       let chip = try nonemptyHardwareProperty("machdep.cpu.brand_string")
       let rawTarget = try nonemptyHardwareProperty("hw.targettype").lowercased()

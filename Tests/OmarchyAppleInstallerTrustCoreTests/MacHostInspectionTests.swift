@@ -5,6 +5,23 @@
   @testable import OmarchyAppleInstallerTrustCore
 
   final class MacHostInspectionTests: XCTestCase {
+    func testM5ProIdentityDoesNotRequireStorageOrPowerCommands() throws {
+      // Empty command responses make any accidental full inspection fail.
+      let inspector = AppleSiliconHostInspector(
+        hardware: FixtureHardwarePropertyReader(values: [
+          "hw.model": "Mac17,8", "machdep.cpu.brand_string": "Apple M5 Pro",
+          "hw.targettype": "J716s",
+        ]),
+        commands: FixtureReadOnlyCommandRunner(root: Data(), limits: Data(), power: Data()),
+        operatingSystem: FixtureOperatingSystemVersionReader())
+
+      let identity = try inspector.inspectIdentity()
+
+      XCTAssertEqual(identity.model, "Mac17,8")
+      XCTAssertEqual(identity.chip, "Apple M5 Pro")
+      XCTAssertEqual(identity.deviceIdentifier, "apple,j716s")
+    }
+
     func testTheModelCheckAloneRefusesOnlyTheBlockedModel() throws {
       let unused = FixtureReadOnlyCommandRunner(root: Data(), limits: Data(), power: Data())
       let cases = [("J614s", true), ("apple,j614s", true), ("J613", false), ("J314s", false)]
