@@ -5,6 +5,50 @@
   @testable import OmarchyAppleInstallerTrustCore
 
   final class MacHostInspectionTests: XCTestCase {
+    func testUnavailableTargetTypeFallsBackToPlatformCompatibility() throws {
+      let reader = MacHardwarePropertyReader(
+        sysctl: FixtureHardwarePropertyReader(values: ["hw.model": "Mac17,8"]),
+        platform: FixturePlatformCompatibilityReader(
+          data: Data("J716sAP\0Mac17,8\0AppleARM\0".utf8)))
+
+      XCTAssertEqual(try reader.string(named: "hw.targettype"), "j716s")
+      XCTAssertEqual(try reader.string(named: "hw.model"), "Mac17,8")
+      XCTAssertThrowsError(try reader.string(named: "missing.property"))
+    }
+
+    func testAvailableSysctlTargetDoesNotUseRegistryFallback() throws {
+      let reader = MacHardwarePropertyReader(
+        sysctl: FixtureHardwarePropertyReader(values: ["hw.targettype": "J314s"]),
+        platform: FixturePlatformCompatibilityReader(data: Data()))
+      XCTAssertEqual(try reader.string(named: "hw.targettype"), "J314s")
+    }
+
+    func testRegistryFallbackPreservesBlockedModelCheck() throws {
+      let inspector = AppleSiliconHostInspector(
+        hardware: MacHardwarePropertyReader(
+          sysctl: FixtureHardwarePropertyReader(values: [
+            "hw.model": "Mac16,8", "machdep.cpu.brand_string": "Apple M4 Pro",
+          ]),
+          platform: FixturePlatformCompatibilityReader(data: Data("J614sAP\0Mac16,8\0".utf8))),
+        commands: FixtureReadOnlyCommandRunner(root: Data(), limits: Data(), power: Data()),
+        operatingSystem: FixtureOperatingSystemVersionReader())
+
+      XCTAssertTrue(try inspector.isBlockedModel())
+    }
+
+    func testCompatibilityFallbackRejectsMissingMalformedAndAmbiguousBoards() {
+      for data in [
+        Data(), Data("J716sAP".utf8), Data("Mac17,8\0AppleARM\0".utf8),
+        Data("J716sAP\0J717sAP\0".utf8), Data("J716sAP;erase\0".utf8), Data("J716sAP\n\0".utf8),
+        Data([0xFF, 0]),
+      ] {
+        XCTAssertThrowsError(try MacHardwarePropertyReader.targetType(from: data)) {
+          XCTAssertEqual(
+            $0 as? AppleSiliconHostInspectionError, .invalidHardwareProperty("hw.targettype"))
+        }
+      }
+    }
+
     func testM5ProIdentityDoesNotRequireStorageOrPowerCommands() throws {
       // Empty command responses make any accidental full inspection fail.
       let inspector = AppleSiliconHostInspector(
@@ -166,6 +210,11 @@
         operatingSystem: FixtureOperatingSystemVersionReader()
       )
     }
+  }
+
+  private struct FixturePlatformCompatibilityReader: PlatformCompatibilityReading {
+    let data: Data
+    func compatible() throws -> Data { data }
   }
 
   final class APFSSnapshotInspectorTests: XCTestCase {
