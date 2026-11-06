@@ -2,6 +2,7 @@
   import CoreFoundation
   import Darwin
   import Foundation
+  import IOKit
 
   public struct AppleSiliconHostInspection: Equatable, Sendable {
     public let identity: AppleMacIdentity
@@ -63,7 +64,7 @@
     private let operatingSystem: any OperatingSystemVersionReading
 
     public init() {
-      hardware = SysctlHardwarePropertyReader()
+      hardware = MacHardwarePropertyReader()
       commands = FoundationReadOnlyMacCommandRunner()
       operatingSystem = ProcessInfoOperatingSystemVersionReader()
     }
@@ -113,7 +114,9 @@
       )
     }
 
-    private func inspectIdentity() throws -> AppleMacIdentity {
+    /// Hardware identity only: no storage, power, engine, or catalog probes.
+    /// Recognizing a board does not establish installation eligibility.
+    public func inspectIdentity() throws -> AppleMacIdentity {
       let model = try nonemptyHardwareProperty("hw.model")
       let chip = try nonemptyHardwareProperty("machdep.cpu.brand_string")
       let rawTarget = try nonemptyHardwareProperty("hw.targettype").lowercased()
@@ -166,6 +169,67 @@
 
   protocol HardwarePropertyReading: Sendable {
     func string(named name: String) throws -> String
+  }
+
+  protocol PlatformCompatibilityReading: Sendable {
+    func compatible() throws -> Data
+  }
+
+  struct IORegistryPlatformCompatibilityReader: PlatformCompatibilityReading {
+    func compatible() throws -> Data {
+      let service = IOServiceGetMatchingService(
+        kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
+      guard service != 0 else {
+        throw AppleSiliconHostInspectionError.hardwarePropertyUnavailable("hw.targettype")
+      }
+      defer { IOObjectRelease(service) }
+      guard
+        let data = IORegistryEntryCreateCFProperty(
+          service, "compatible" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data
+      else {
+        throw AppleSiliconHostInspectionError.hardwarePropertyUnavailable("hw.targettype")
+      }
+      return data
+    }
+  }
+
+  struct MacHardwarePropertyReader: HardwarePropertyReading {
+    let sysctl: any HardwarePropertyReading
+    let platform: any PlatformCompatibilityReading
+
+    init(
+      sysctl: any HardwarePropertyReading = SysctlHardwarePropertyReader(),
+      platform: any PlatformCompatibilityReading = IORegistryPlatformCompatibilityReader()
+    ) {
+      self.sysctl = sysctl
+      self.platform = platform
+    }
+
+    func string(named name: String) throws -> String {
+      do {
+        return try sysctl.string(named: name)
+      } catch AppleSiliconHostInspectionError.hardwarePropertyUnavailable(let property)
+        where name == "hw.targettype" && property == name
+      {
+        return try Self.targetType(from: platform.compatible())
+      }
+    }
+
+    static func targetType(from compatible: Data) throws -> String {
+      guard compatible.last == 0, let value = String(data: compatible, encoding: .utf8) else {
+        throw AppleSiliconHostInspectionError.invalidHardwareProperty("hw.targettype")
+      }
+      // The AP suffix denotes the platform target, e.g. J716sAP -> j716s.
+      // Other entries (Mac17,8 and AppleARM) are not board identifiers.
+      let targets = Set(
+        value.components(separatedBy: "\0").filter {
+          $0.range(of: "\\AJ[0-9]+[a-z]*AP\\z", options: .regularExpression) != nil
+        }.map { String($0.dropLast(2)).lowercased() })
+      guard targets.count == 1, let target = targets.first else {
+        throw AppleSiliconHostInspectionError.invalidHardwareProperty("hw.targettype")
+      }
+      return target
+    }
   }
 
   struct SysctlHardwarePropertyReader: HardwarePropertyReading {

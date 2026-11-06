@@ -11,6 +11,20 @@ import OmarchyAppleInstallerTrustCore
   }
 
   private static func check() async throws {
+    if CommandLine.arguments == [CommandLine.arguments[0], "--identity-only"] {
+      let identity = try AppleSiliconHostInspector().inspectIdentity()
+      let data = try JSONSerialization.data(
+        withJSONObject: [
+          "schema_version": 1,
+          "model": identity.model,
+          "chip": identity.chip,
+          "device_identifier": identity.deviceIdentifier,
+          "installation_readiness": "not_assessed",
+        ], options: [.prettyPrinted, .sortedKeys])
+      FileHandle.standardOutput.write(data)
+      FileHandle.standardOutput.write(Data("\n".utf8))
+      return
+    }
     guard CommandLine.arguments.count == 2,
       let bundle = Bundle(url: URL(fileURLWithPath: CommandLine.arguments[1]))
     else { throw NSError(domain: "readiness", code: 64) }
